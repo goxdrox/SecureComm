@@ -1,12 +1,22 @@
 // server/server.js
-const express    = require('express');
-const cors       = require('cors');
-const { MongoClient } = require('mongodb');
-const WebSocket  = require('ws');
 
-const PORT      = 8080;
-const MONGO_URL = 'mongodb://localhost:27017';
-const DB_NAME   = 'secureComm';
+require('dotenv').config(); // Load environment variables from .env
+const express = require('express');
+const cors = require('cors');
+const crypto = require('crypto');
+const { MongoClient } = require('mongodb');
+const WebSocket = require('ws');
+
+const PORT = process.env.PORT || 8080;
+// Use environment variable for MongoDB URI
+const MONGO_URL = process.env.MONGO_URI;
+const DB_NAME = process.env.DB_NAME || 'secureComm';
+
+if (!MONGO_URL) {
+  console.log(process.env)
+  console.error('Missing MONGO_URI environment variable');
+  process.exit(1);
+}
 
 const app = express();
 app.use(cors());
@@ -19,68 +29,100 @@ MongoClient.connect(MONGO_URL, { useUnifiedTopology: true })
   .then(client => {
     db = client.db(DB_NAME);
     usersColl = db.collection('users');
-    msgsColl  = db.collection('messages');
+    msgsColl = db.collection('messages');
     console.log('Connected to MongoDB');
   })
-  .catch(err => { console.error(err); process.exit(1); });
+  .catch(err => {
+    console.error('MongoDB connection error:', err);
+    process.exit(1);
+  });
 
-// -- HTTP API --
+// Helper to generate 6-digit social number
+function generateSocialNumber() {
+  return String(Math.floor(100000 + Math.random() * 900000));
+}
 
-// 1) Register or update a user’s public key
-app.post('/register', async (req, res) => {
-  const { uid, publicKey } = req.body;
-  if (!uid || !publicKey) {
-    return res.status(400).json({ error: 'uid & publicKey required' });
-  }
-  await usersColl.updateOne(
-    { uid },
-    { $set: { publicKey } },
+// 1) Request magic link
+app.post('/auth/request-link', async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: 'Email required' });
+  const token = crypto.randomBytes(16).toString('hex');
+  await db.collection('magicTokens').updateOne(
+    { token },
+    { $set: { email, createdAt: new Date() } },
     { upsert: true }
   );
+  console.log(`Magic link for ${email}: securecomm://auth/${token}`);
   res.json({ success: true });
 });
 
-// 2) Lookup a user’s public key
-app.get('/users/:uid', async (req, res) => {
-  const user = await usersColl.findOne({ uid: req.params.uid });
-  if (!user) return res.status(404).json({ error: 'User not found' });
-  res.json({ publicKey: user.publicKey });
+// 2) Verify magic token
+app.post('/auth/verify-token', async (req, res) => {
+  const { token } = req.body;
+  const tokenDoc = await db.collection('magicTokens').findOne({ token });
+  if (!tokenDoc) return res.status(400).json({ error: 'Invalid token' });
+  const { email } = tokenDoc;
+  await db.collection('magicTokens').deleteOne({ token });
+
+  let user = await usersColl.findOne({ email });
+  if (!user) {
+    const uid = crypto.randomBytes(4).toString('hex');
+    const socialNumber = generateSocialNumber();
+    user = { email, publicKey: null, uid, socialNumber };
+    await usersColl.insertOne(user);
+  }
+  res.json({ uid: user.uid, publicKey: user.publicKey });
 });
 
-// 3) Fetch past messages for a user
+// 3) Upload public key
+app.post('/users/upload-key', async (req, res) => {
+  const { uid, publicKey } = req.body;
+  if (!uid || !publicKey) return res.status(400).json({ error: 'uid & publicKey required' });
+  const result = await usersColl.updateOne({ uid }, { $set: { publicKey } });
+  if (result.matchedCount === 0) return res.status(404).json({ error: 'User not found' });
+  res.json({ success: true });
+});
+
+// 4) Fetch social number
+app.get('/users/:uid/social-number', async (req, res) => {
+  const user = await usersColl.findOne({ uid: req.params.uid });
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  res.json({ socialNumber: user.socialNumber });
+});
+
+// 5) Lookup by social number
+app.get('/users/by-social/:socialNumber', async (req, res) => {
+  const user = await usersColl.findOne({ socialNumber: req.params.socialNumber });
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  res.json({ uid: user.uid, email: user.email, publicKey: user.publicKey });
+});
+
+// 6) HTTP fetch past messages
 app.get('/messages/:uid', async (req, res) => {
-  const msgs = await msgsColl
-    .find({ recipientUid: req.params.uid })
-    .sort({ timestamp: 1 })
-    .toArray();
+  const msgs = await msgsColl.find({ recipientUid: req.params.uid }).sort({ timestamp: 1 }).toArray();
   res.json(msgs);
 });
 
-// -- WebSocket Upgrade --
-const server = app.listen(PORT, () => {
-  console.log(`Server listening on http://localhost:${PORT}`);
-});
-const wss = new WebSocket.Server({ noServer: true });
-server.on('upgrade', (req, sock, head) => {
-  wss.handleUpgrade(req, sock, head, ws => wss.emit('connection', ws, req));
-});
+// Start HTTP server
+const server = app.listen(PORT, () => console.log(`Server listening on http://localhost:${PORT}`));
 
-// -- WebSocket Logic (unchanged except save msg to msgsColl) --
+// 7) WebSocket setup
+const wss = new WebSocket.Server({ server });
+
 wss.on('connection', ws => {
   ws.on('message', async data => {
     const msg = JSON.parse(data);
     if (msg.type === 'register-ws') {
-      // map uid->ws for real-time routing
-      ws.uid = msg.uid; // attach to socket
+      ws.uid = msg.uid;
       return;
     }
     if (msg.type === 'message') {
       await msgsColl.insertOne({ ...msg, timestamp: new Date() });
-      const recipient = [...wss.clients].find(c => c.uid === msg.recipientUid);
-      if (recipient && recipient.readyState === WebSocket.OPEN) {
-        recipient.send(JSON.stringify(msg));
-      }
+      wss.clients.forEach(client => {
+        if (client !== ws && client.uid === msg.recipientUid && client.readyState === WebSocket.OPEN) {
+          client.send(JSON.stringify(msg));
+        }
+      });
     }
   });
-  ws.on('close', () => { /* cleanup if needed */ });
 });

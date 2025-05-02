@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, Button, ActivityIndicator, StyleSheet, Clipboard, Alert } from 'react-native';
-import { storeSession } from '../storage/secureStorage'; // Assuming the storeSession function exists
 
 interface Props {
   route: {
@@ -9,6 +8,11 @@ interface Props {
     };
   };
   navigation: any;
+}
+
+// Define the expected shape of the response data
+interface SocialNumberResponse {
+  socialNumber: string;
 }
 
 const ShowSocialNumber = ({ route, navigation }: Props) => {
@@ -21,11 +25,10 @@ const ShowSocialNumber = ({ route, navigation }: Props) => {
       try {
         const res = await fetch(`http://10.0.2.2:8080/users/${uid}/social-number`);
         if (!res.ok) throw new Error('Failed to fetch social number');
-        const { socialNumber } = await res.json();
-        setSocialNumber(socialNumber);
         
-        // Store the social number in the session or local storage
-        await storeSession({ uid, socialNumber });
+        // Type the response to conform to SocialNumberResponse
+        const { socialNumber }: SocialNumberResponse = await res.json();
+        setSocialNumber(socialNumber);
       } catch (e) {
         Alert.alert('Error', 'Could not load social number.');
         console.error(e);
