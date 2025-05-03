@@ -10,7 +10,7 @@ import ContactsScreen from './screens/ContactsScreen';
 import SettingsScreen from './screens/SettingsScreen';
 import MessagesListScreen from './screens/MessagesListScreen';
 
-// 👇 Update root stack param list
+// Navigation Types
 export type RootParamList = {
   Login: undefined;
   MagicLink: { token: string };
@@ -22,10 +22,23 @@ export type RootParamList = {
 const Stack = createStackNavigator<RootParamList>();
 const Tab = createBottomTabNavigator();
 
+const linking = {
+  prefixes: ['securecomm://'],
+  config: {
+    screens: {
+      MagicLink: 'auth/:token', // deep link like securecomm://auth/abcdef1234
+    },
+  },
+};
+
 function HomeTabs() {
   return (
     <Tab.Navigator initialRouteName="MessagesList">
-      <Tab.Screen name="MessagesList" component={MessagesListScreen} options={{ title: 'Messages' }} />
+      <Tab.Screen
+        name="MessagesList"
+        component={MessagesListScreen}
+        options={{ title: 'Messages' }}
+      />
       <Tab.Screen name="Contacts" component={ContactsScreen} />
       <Tab.Screen name="Settings" component={SettingsScreen} />
     </Tab.Navigator>
@@ -34,7 +47,7 @@ function HomeTabs() {
 
 export default function App() {
   return (
-    <NavigationContainer>
+    <NavigationContainer linking={linking}>
       <Stack.Navigator initialRouteName="Login" screenOptions={{ headerShown: false }}>
         <Stack.Screen name="Login" component={LoginScreen} />
         <Stack.Screen name="MagicLink" component={MagicLinkScreen} />

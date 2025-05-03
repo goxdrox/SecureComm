@@ -6,8 +6,8 @@ const cors = require('cors');
 const crypto = require('crypto');
 const { MongoClient } = require('mongodb');
 const WebSocket = require('ws');
+const rateLimit = require('express-rate-limit');
 const sendMagicLinkEmail = require('./utils/sendEmail');
-
 
 const PORT = process.env.PORT || 8080;
 const MONGO_URL = process.env.MONGO_URI;
@@ -22,14 +22,27 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Rate limiter for auth link requests
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5,
+  message: { error: 'Too many requests, try again later.' }
+});
+app.use('/auth/request-link', authLimiter);
+
 let db, usersColl, msgsColl;
 
-// Initialize MongoDB
+// Connect to MongoDB
 MongoClient.connect(MONGO_URL, { useUnifiedTopology: true })
-  .then(client => {
+  .then(async client => {
     db = client.db(DB_NAME);
     usersColl = db.collection('users');
     msgsColl = db.collection('messages');
+
+    const magicTokens = db.collection('magicTokens');
+    // Set TTL index if not already set
+    await magicTokens.createIndex({ createdAt: 1 }, { expireAfterSeconds: 900 }); // 15 mins
+
     console.log('Connected to MongoDB');
   })
   .catch(err => {
@@ -37,7 +50,6 @@ MongoClient.connect(MONGO_URL, { useUnifiedTopology: true })
     process.exit(1);
   });
 
-// Helper to generate 9-digit social number as string
 function generateSocialNumber() {
   return String(Math.floor(100000000 + Math.random() * 900000000));
 }
@@ -45,7 +57,9 @@ function generateSocialNumber() {
 // 1) Request magic link
 app.post('/auth/request-link', async (req, res) => {
   const { email } = req.body;
-  if (!email) return res.status(400).json({ error: 'Email required' });
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return res.status(400).json({ error: 'Valid email required' });
+  }
 
   const token = crypto.randomBytes(16).toString('hex');
   await db.collection('magicTokens').updateOne(
@@ -61,7 +75,7 @@ app.post('/auth/request-link', async (req, res) => {
     console.error('Failed to send email:', err);
     return res.status(500).json({ error: 'Failed to send email' });
   }
-  
+
   res.json({ success: true });
 });
 
@@ -69,7 +83,7 @@ app.post('/auth/request-link', async (req, res) => {
 app.post('/auth/verify-token', async (req, res) => {
   const { token } = req.body;
   const tokenDoc = await db.collection('magicTokens').findOne({ token });
-  if (!tokenDoc) return res.status(400).json({ error: 'Invalid token' });
+  if (!tokenDoc) return res.status(400).json({ error: 'Invalid or expired token' });
 
   const { email } = tokenDoc;
   await db.collection('magicTokens').deleteOne({ token });
@@ -77,7 +91,7 @@ app.post('/auth/verify-token', async (req, res) => {
   let user = await usersColl.findOne({ email });
   if (!user) {
     const uid = crypto.randomBytes(4).toString('hex');
-    const socialNumber = generateSocialNumber(); // now 9 digits
+    const socialNumber = generateSocialNumber();
     user = { email, publicKey: null, uid, socialNumber };
     await usersColl.insertOne(user);
   }
@@ -88,7 +102,9 @@ app.post('/auth/verify-token', async (req, res) => {
 // 3) Upload public key
 app.post('/users/upload-key', async (req, res) => {
   const { uid, publicKey } = req.body;
-  if (!uid || !publicKey) return res.status(400).json({ error: 'uid & publicKey required' });
+  if (!uid || typeof publicKey !== 'string') {
+    return res.status(400).json({ error: 'uid and valid publicKey required' });
+  }
 
   const result = await usersColl.updateOne({ uid }, { $set: { publicKey } });
   if (result.matchedCount === 0) return res.status(404).json({ error: 'User not found' });
