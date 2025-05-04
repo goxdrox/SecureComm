@@ -1,15 +1,28 @@
 import React, { useEffect } from 'react';
-import { View, ActivityIndicator, Alert } from 'react-native';
+import { View, ActivityIndicator, Alert, StyleSheet } from 'react-native';
+import { StackNavigationProp } from '@react-navigation/stack';
+import { RouteProp } from '@react-navigation/native';
 import { savePrivateKey, savePublicKey, storeSession } from '../storage/secureStorage';
 import { generateKeyPair } from '../utils/crypto';
 import { encodeBase64 } from '../utils/helpers';
+import { RootParamList } from '../App';
 
-const MagicLinkScreen = ({ route, navigation }: any) => {
+// Navigation types for MagicLinkScreen
+type MagicLinkScreenNavigationProp = StackNavigationProp<RootParamList, 'MagicLink'>;
+type MagicLinkScreenRouteProp = RouteProp<RootParamList, 'MagicLink'>;
+
+interface MagicLinkScreenProps {
+  navigation: MagicLinkScreenNavigationProp;
+  route: MagicLinkScreenRouteProp;
+}
+
+const MagicLinkScreen: React.FC<MagicLinkScreenProps> = ({ route, navigation }) => {
   const { token } = route.params;
 
   useEffect(() => {
     const finishLogin = async () => {
       try {
+        // Verify the magic token with backend
         const res = await fetch('http://10.0.2.2:8080/auth/verify-token', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -18,14 +31,14 @@ const MagicLinkScreen = ({ route, navigation }: any) => {
 
         if (!res.ok) throw new Error('Invalid token');
 
-        const { uid, publicKey: existingPublicKey } = await res.json();
+        const { uid, publicKey: existingPublicKey, socialNumber } = await res.json();
 
+        // Generate new key pair for the user
         const keypair = await generateKeyPair();
-
         const pub64 = encodeBase64(keypair.publicKey);
         const priv64 = encodeBase64(keypair.secretKey);
 
-        // Upload public key only if not yet uploaded
+        // Upload public key if not already set
         if (!existingPublicKey) {
           await fetch('http://10.0.2.2:8080/users/upload-key', {
             method: 'POST',
@@ -34,25 +47,39 @@ const MagicLinkScreen = ({ route, navigation }: any) => {
           });
         }
 
+        // Securely store key pair and session
         await savePrivateKey(priv64);
         await savePublicKey(pub64);
-        await storeSession({ token, uid });
 
+
+        await storeSession({ token, uid, socialNumber });
+
+
+        // Navigate to display social number (home flow)
         navigation.reset({ index: 0, routes: [{ name: 'ShowSocialNumber', params: { uid } }] });
       } catch (e) {
-        Alert.alert('Login Failed', 'Could not verify magic link.');
-        navigation.navigate('EnterEmail');
+        // On error, alert and go back to login screen
+        Alert.alert('Login Failed', 'Could not verify magic link. Please try again.');
+        navigation.navigate('Login');
       }
     };
 
     finishLogin();
-  }, []);
+  }, [token, navigation]);
 
   return (
-    <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+    <View style={styles.container}>
       <ActivityIndicator size="large" />
     </View>
   );
 };
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+});
 
 export default MagicLinkScreen;

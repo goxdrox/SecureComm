@@ -1,5 +1,3 @@
-// src/screens/RegisterScreen.tsx
-
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, Alert, StyleSheet } from 'react-native';
 
@@ -12,15 +10,16 @@ const RegisterScreen = ({ navigation }: any) => {
 
     setLoading(true);
     try {
-      const res = await fetch('http://10.0.2.2:8080/auth/request', {
+      const res = await fetch('http://10.0.2.2:8080/auth/request-link', {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email })
       });
 
       if (!res.ok) throw new Error('Failed to request verification');
+
       Alert.alert('Check your email for the code');
-      navigation.navigate('VerifyScreen', { email });
+      navigation.navigate('VerifyScreen', { email }); // Navigate directly to VerifyScreen
     } catch (err) {
       console.error(err);
       Alert.alert('Error', 'Could not send verification code');

@@ -1,22 +1,22 @@
 // server/utils/sendEmail.js
 
 const { Resend } = require('resend');
-
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-async function sendMagicLinkEmail(to, token) {
-  const magicLink = `securecomm://auth/${token}`;
+async function sendVerificationCodeEmail(to, code) {
+  const html = `
+    <p>Welcome to SecureComm!</p>
+    <p>Your verification code is:</p>
+    <h2 style="font-family: monospace; letter-spacing: 2px;">${code}</h2>
+    <p>This code expires in 10 minutes.</p>
+    <p>If you did not request this, you can ignore this email.</p>
+  `;
 
   const { error } = await resend.emails.send({
-    from: 'SecureComm <faradome@oddgenetics.com>',
+    from: 'SecureComm <no-reply@oddgenetics.com>',
     to,
-    subject: 'Your SecureComm Magic Login Link',
-    html: `
-      <h2>Welcome to SecureComm</h2>
-      <p>Click the link below to log in securely:</p>
-      <a href="${magicLink}">${magicLink}</a>
-      <p>If you're on mobile, your app should open automatically.</p>
-    `
+    subject: 'Your SecureComm Verification Code',
+    html,
   });
 
   if (error) {
@@ -25,4 +25,4 @@ async function sendMagicLinkEmail(to, token) {
   }
 }
 
-module.exports = sendMagicLinkEmail;
+module.exports = sendVerificationCodeEmail;

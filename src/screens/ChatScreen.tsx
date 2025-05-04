@@ -42,10 +42,10 @@ const ChatScreen = ({ route }: any) => {
 
       try {
         const url = `http://10.0.2.2:8080/messages/${session.uid}`;
-        console.log('Fetching history from', url);
+
 
         const res = await fetch(url);
-        console.log('History response status:', res.status);
+  
 
         if (!res.ok) {
           const body = await res.text();
@@ -54,7 +54,7 @@ const ChatScreen = ({ route }: any) => {
         }
 
         const history = await res.json();
-        console.log('History JSON:', history);
+   
 
         const decrypted: Message[] = [];
         const privKeyBase64 = await getPrivateKey();

@@ -1,18 +1,38 @@
 // src/screens/VerifyScreen.tsx
 
-import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, Alert, StyleSheet } from 'react-native';
+import React, {useState} from 'react';
+import {
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  Alert,
+  StyleSheet,
+} from 'react-native';
 import nacl from 'tweetnacl';
-import { encodeBase64 } from '../utils/helpers';
-import { savePrivateKey, savePublicKey, storeSession } from '../storage/secureStorage';
+import {encodeBase64} from '../utils/helpers';
+import {
+  savePrivateKey,
+  savePublicKey,
+  storeSession,
+} from '../storage/secureStorage';
 
-const VerifyScreen = ({ route, navigation }: any) => {
-  const { email } = route.params;
+interface VerifyScreenProps {
+  route: {params: {email: string}};
+  navigation: any;
+}
+
+const VerifyScreen = ({route, navigation}: VerifyScreenProps) => {
+  const {email} = route.params;
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
 
   const verifyCode = async () => {
-    if (code.trim().length < 4) return Alert.alert('Code too short');
+    if (code.trim().length !== 6) {
+      Alert.alert('Invalid code', 'Please enter a 6-digit code.');
+      return;
+    }
+
     setLoading(true);
 
     try {
@@ -21,26 +41,29 @@ const VerifyScreen = ({ route, navigation }: any) => {
       const pub = encodeBase64(keyPair.publicKey);
       const priv = encodeBase64(keyPair.secretKey);
 
-      // 2. Send code + public key to server
-      const res = await fetch('http://10.0.2.2:8080/auth/verify', {
+      // 2. Send email + code + public key to server
+      const res = await fetch('http://10.0.2.2:8080/auth/verify-token', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ email, code, publicKey: pub })
+        body: JSON.stringify({email, code, publicKey: pub}),
       });
 
       if (!res.ok) throw new Error('Invalid code or server error');
-      const { token, uid } = await res.json();
+      const {token, uid, socialNumber} = await res.json();
 
       // 3. Save session + keys
       await savePrivateKey(priv);
       await savePublicKey(pub);
-      await storeSession({ token, uid });
+      await storeSession({token, uid, socialNumber});
 
-      Alert.alert('Success', `Welcome! Your social number is ${uid}`);
-      navigation.reset({ index: 0, routes: [{ name: 'ChatListScreen' }] }); // Or Home screen
+      Alert.alert('Success', 'Welcome!');
+      navigation.reset({index: 0, routes: [{name: 'HomeTabs'}]});
     } catch (err) {
       console.error(err);
-      Alert.alert('Verification failed');
+      Alert.alert(
+        'Verification failed',
+        'Please check your code and try again.',
+      );
     } finally {
       setLoading(false);
     }
@@ -48,16 +71,25 @@ const VerifyScreen = ({ route, navigation }: any) => {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Enter Verification Code</Text>
+      <Text style={styles.title}>
+        Enter the code sent to{`\n`}
+        {email}
+      </Text>
       <TextInput
         style={styles.input}
         placeholder="123456"
         keyboardType="numeric"
+        maxLength={6}
         value={code}
         onChangeText={setCode}
       />
-      <TouchableOpacity onPress={verifyCode} style={styles.button}>
-        <Text style={styles.buttonText}>{loading ? 'Verifying...' : 'Verify'}</Text>
+      <TouchableOpacity
+        onPress={verifyCode}
+        style={styles.button}
+        disabled={loading}>
+        <Text style={styles.buttonText}>
+          {loading ? 'Verifying...' : 'Verify'}
+        </Text>
       </TouchableOpacity>
     </View>
   );
@@ -66,9 +98,20 @@ const VerifyScreen = ({ route, navigation }: any) => {
 export default VerifyScreen;
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', padding: 20 },
-  title: { fontSize: 24, fontWeight: 'bold', marginBottom: 20 },
-  input: { borderWidth: 1, borderColor: '#ccc', padding: 12, borderRadius: 8, marginBottom: 20 },
-  button: { backgroundColor: '#28a745', padding: 14, borderRadius: 8 },
-  buttonText: { color: '#fff', textAlign: 'center', fontWeight: 'bold' },
+  container: {flex: 1, justifyContent: 'center', padding: 20},
+  title: {fontSize: 20, textAlign: 'center', marginBottom: 20},
+  input: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 20,
+  },
+  button: {
+    backgroundColor: '#28a745',
+    padding: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  buttonText: {color: '#fff', fontWeight: 'bold'},
 });

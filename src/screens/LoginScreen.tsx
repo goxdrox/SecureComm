@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { TextInput, Button, View, Text, Alert } from 'react-native';
+import { TextInput, Button, View, Text, Alert, TouchableOpacity } from 'react-native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { RootParamList } from '../App';
 
@@ -28,6 +28,9 @@ const LoginScreen = ({ navigation }: Props) => {
       if (!res.ok) throw new Error('Request failed');
 
       Alert.alert('Success', 'Check your email for a magic login link.');
+
+      // After the magic link is sent, navigate to VerifyScreen
+      navigation.navigate('VerifyScreen', { email });  // Navigate to VerifyScreen with email as a parameter
     } catch (e) {
       console.error(e);
       Alert.alert('Error', 'Could not send magic link.');
@@ -55,7 +58,17 @@ const LoginScreen = ({ navigation }: Props) => {
         keyboardType="email-address"
         autoCapitalize="none"
       />
-      <Button title={loading ? 'Sending...' : 'Send Magic Link'} onPress={handleRequestMagicLink} disabled={loading} />
+      <Button
+        title={loading ? 'Sending...' : 'Send Magic Link'}
+        onPress={handleRequestMagicLink}
+        disabled={loading}
+      />
+
+      <TouchableOpacity onPress={() => navigation.navigate('RegisterScreen')}>
+        <Text style={{ marginTop: 30, textAlign: 'center', color: '#007bff' }}>
+          Don’t have an account? Register Instead
+        </Text>
+      </TouchableOpacity>
     </View>
   );
 };
