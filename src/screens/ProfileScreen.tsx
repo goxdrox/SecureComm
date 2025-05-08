@@ -71,7 +71,7 @@ const ProfileScreen = ({ navigation }: any) => {
         {photoUri ? (
           <Image source={{ uri: photoUri }} style={styles.photo} />
         ) : (
-          <Text style={styles.photoPlaceholder}>Tap to choose photo</Text>
+          <Image source={require('../media/add-profile.jpg')} style={styles.photo} />
         )}
       </TouchableOpacity>
 

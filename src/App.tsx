@@ -16,6 +16,7 @@ import ContactsScreen from './screens/ContactsScreen';
 import SettingsScreen from './screens/SettingsScreen';
 import MessagesListScreen from './screens/MessagesListScreen';
 import ProfileScreen from './screens/ProfileScreen';
+import ContactProfileScreen from './screens/ContactProfileScreen';
 
 // Navigation Types
 export type RootParamList = {
@@ -27,6 +28,7 @@ export type RootParamList = {
   HomeTabs: undefined;
   Chat: {recipientUid: string};
   Profile: undefined;
+  ContactProfile: undefined;
 };
 
 const Stack = createStackNavigator<RootParamList>();
@@ -108,6 +110,7 @@ export default function App() {
         <Stack.Screen name="HomeTabs" component={HomeTabs} />
         <Stack.Screen name="Chat" component={ChatScreen} />
         <Stack.Screen name="Profile" component={ProfileScreen} />
+        <Stack.Screen name="ContactProfile" component={ContactProfileScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );
