@@ -28,33 +28,107 @@ const ContactsScreen = ({navigation}: any) => {
   const [refreshing, setRefreshing] = useState(false);
 
   const fetchContacts = async () => {
+    setLoading(true); // Set loading to true when fetching starts
+    setRefreshing(true); // Also indicate refreshing if called by onRefresh
+
     try {
       const session = await getSession();
-      const currentUser = session?.uid;
-      const res = await fetch(`http://10.0.2.2:8080/${currentUser}/contacts`);
-      const data = await res.json();
+      console.log('ContactsScreen: Retrieved session:', session); // For debugging
+
+      if (!session || !session.uid || !session.token) {
+        console.error(
+          'Fetch contacts failed: No active session, UID, or token.',
+        );
+        Alert.alert(
+          'Authentication Error',
+          "You're not logged in. Please log in to view contacts.",
+        );
+        setContacts([]);
+        setFilteredContacts([]);
+        // navigation.navigate('Login'); // Optionally navigate to login
+        return; // Exit early
+      }
+
+      const currentUserUid = session.uid;
+      const token = session.token;
+
+      // Corrected URL and added headers with authentication token
+      const response = await fetch(
+        `http://10.0.2.2:8080/users/${currentUserUid}/contacts`,
+        {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Session-Token': token,
+          },
+        },
+      );
+
+      const responseText = await response.text(); // Get raw response text first for better debugging
+      console.log(
+        `ContactsScreen: Fetch contacts response status: ${response.status}`,
+      );
+      // console.log(`ContactsScreen: Fetch contacts response text: ${responseText}`); // Uncomment for deep debug
+
+      if (!response.ok) {
+        // Try to parse error JSON from server, otherwise use status text
+        let errorMessage = `Server error: ${response.status}`;
+        try {
+          const errorJson = JSON.parse(responseText);
+          errorMessage = errorJson.error || errorJson.message || errorMessage;
+        } catch (e) {
+          // Response was not JSON (e.g., HTML error page)
+          console.warn(
+            'ContactsScreen: Non-JSON error response from server:',
+            responseText,
+          );
+          if (
+            responseText.toLowerCase().includes('cannot get') ||
+            response.status === 404
+          ) {
+            errorMessage =
+              'Could not reach contacts service (404). Please check the URL.';
+          } else if (responseText.length < 200 && responseText.length > 0) {
+            // Short non-JSON error
+            errorMessage = responseText;
+          }
+        }
+        throw new Error(errorMessage);
+      }
+
+      const data = JSON.parse(responseText); // Now parse as JSON
 
       if (!Array.isArray(data)) {
-        console.warn('Unexpected response format:', data);
+        console.warn(
+          'ContactsScreen: Unexpected response format (expected array):',
+          data,
+        );
+        Alert.alert(
+          'Data Error',
+          'Received an unexpected format for contacts from the server.',
+        );
         setContacts([]);
         setFilteredContacts([]);
         return;
       }
 
-      const mappedContacts = data.map((e: any) => ({
+      const mappedContacts: Contact[] = data.map((e: any) => ({
         uid: e.uid,
         socialNumber: e.socialNumber,
-        name: e.name || null,
+        name: e.name || e.socialNumber || `User ${e.uid.substring(0, 4)}`, // Provide a better fallback name
       }));
 
       setContacts(mappedContacts);
-      setFilteredContacts(mappedContacts);
-    } catch (e) {
-      console.error('Fetch contacts failed:', e);
-      setContacts([]);
+      setFilteredContacts(mappedContacts); // Initialize filtered contacts
+    } catch (error: any) {
+      // Catch as any or unknown
+      console.error('Fetch contacts failed:', error.message, error);
+      Alert.alert('Error', `Failed to fetch contacts: ${error.message}`);
+      setContacts([]); // Clear contacts on error to reflect failure
       setFilteredContacts([]);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
@@ -63,9 +137,9 @@ const ContactsScreen = ({navigation}: any) => {
   }, []);
 
   const onRefresh = useCallback(() => {
-    setRefreshing(true);
-    fetchContacts().finally(() => setRefreshing(false));
-  }, []);
+    // fetchContacts already sets refreshing to true and false
+    fetchContacts();
+  }, []); // No dependencies needed as fetchContacts gets fresh session
 
   const debouncedSearch = useCallback(
     debounce((text: string) => {
@@ -73,12 +147,10 @@ const ContactsScreen = ({navigation}: any) => {
         setFilteredContacts(contacts);
         return;
       }
-      const filtered = contacts.filter(c =>
-        c.socialNumber.includes(text)
-      );
+      const filtered = contacts.filter(c => c.socialNumber.includes(text));
       setFilteredContacts(filtered);
     }, 250),
-    [contacts]
+    [contacts],
   );
 
   const handleSearch = (text: string) => {
@@ -91,38 +163,88 @@ const ContactsScreen = ({navigation}: any) => {
     setSearch('');
   };
 
-  const addContact = async () => {
+  // Ensure addContact also uses the correct URL and includes the session token if it modifies server data
+  // Example for addContact (if it were POSTing to add a contact to the current user's list)
+  const findContactBySocial = async () => {
+    // Renamed from addContact for clarity of current function
+    if (!search.trim() || !isOnlyNumbers(search)) {
+      Alert.alert(
+        'Invalid Input',
+        'Please enter a valid social number to search.',
+      );
+      return;
+    }
     try {
       const session = await getSession();
-      const res = await fetch(`http://10.0.2.2:8080/users/by-social/${search}`);
+      console.log('ContactsScreen: Session object before navigating to ContactProfile:', JSON.stringify(session, null, 2));
+
+      if (!session || !session.token) {
+        Alert.alert(
+          'Authentication Issue',
+          'Your session is missing or invalid. Please log in again before searching for contacts.',
+        );
+        return; // Stop further execution if session is invalid
+      }
+      // This endpoint GETS a user profile, does not add a contact directly to current user's list.
+      // The actual adding of a contact happens on ContactProfile screen or similar.
+      const res = await fetch(
+        `http://10.0.2.2:8080/users/by-social/${search.trim()}`,
+        {
+          headers: {
+            // This endpoint on server currently doesn't require auth, but it's good practice if it did.
+            // 'X-Session-Token': session.token,
+          },
+        },
+      );
 
       if (!res.ok) {
-        console.log('User not found');
+        const errText = await res.text();
+        let errMsg = `User not found or error: ${res.status}`;
+        try {
+          const errJson = JSON.parse(errText);
+          errMsg = errJson.error || errMsg;
+        } catch (e) {}
+        Alert.alert('Search Failed', errMsg);
         return;
       }
 
       const data = await res.json();
-      navigation.navigate('ContactProfile', {data, session, fetchContacts});
-    } catch (e) {
-      console.error('Failed to find contact:', e);
+      // Navigate to a screen where the user can confirm adding this found contact
+      navigation.navigate('ContactProfile', {
+        foundContactData: data,
+        currentUserSession: session, // Pass the validated session
+        onContactAdded: fetchContacts,
+      });
+    } catch (e: any) {
+      console.error('Failed to find contact by social:', e);
+      Alert.alert('Error', `Failed to search contact: ${e.message}`);
     }
   };
 
+  // Update the search button handler or input submission to use the correct function
   const handleSearchButtonPress = () => {
-    setShowSearch(prev => !prev);
-    if (search) setSearch('');
+    if (showSearch && search.trim() && isOnlyNumbers(search)) {
+      findContactBySocial(); // If search input is open and has a social number, try to find
+    } else {
+      setShowSearch(prev => !prev); // Toggle search input visibility
+      if (showSearch) setSearch(''); // Clear search if hiding
+    }
   };
+
+  // Ensure onSubmitEditing for the TextInput calls the correct search/add logic
+  // In your existing code, onSubmitEditing={addContact} which is now findContactBySocial
+  // ... in the <TextInput ... onSubmitEditing={findContactBySocial} />
 
   return (
     <View style={styles.container}>
       {loading ? (
         <Text>Loading contacts...</Text>
-      ) : contacts.length === 0 ? (
-        <Text>No contacts</Text>
-      ) : filteredContacts.length === 0 ? (
+      ) :  filteredContacts.length === 0 ? (
         isOnlyNumbers(search) ? (
-          <TouchableOpacity style={styles.contactItem} onPress={addContact}>
-            <Text style={styles.contactName}>Add contact {search}</Text>
+          <TouchableOpacity
+            style={styles.contactItem}
+            onPress={findContactBySocial}>
+            <Text style={styles.contactName}>Search for contact {search}</Text>
           </TouchableOpacity>
         ) : (
           <Text style={styles.contactName}>No contacts found</Text>
@@ -150,15 +272,18 @@ const ContactsScreen = ({navigation}: any) => {
         <View style={styles.searchContainer}>
           <TextInput
             style={styles.searchInput}
-            placeholder="Search"
+            placeholder="Search by Social Number"
             value={search}
-            onChangeText={handleSearch}
-            onSubmitEditing={addContact}
+            onChangeText={handleSearch} // handleSearch calls debouncedSearch for filtering existing list
+            onSubmitEditing={findContactBySocial} // This searches for a new contact on the server
+            keyboardType="numeric"
           />
         </View>
       )}
 
-      <TouchableOpacity style={styles.searchButton} onPress={handleSearchButtonPress}>
+      <TouchableOpacity
+        style={styles.searchButton}
+        onPress={handleSearchButtonPress}>
         <Text style={styles.searchButtonText}>🔍</Text>
       </TouchableOpacity>
     </View>
